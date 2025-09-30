@@ -1,7 +1,7 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const User = require("./models/User");
-
+const bcrypt = require('bcryptjs');
 // Connect to MongoDB
 const connectDB = async () => {
     try {
@@ -32,13 +32,15 @@ const seed = async () => {
         if (existing) {
             console.log("⚠️ Default user already exists");
         } else {
+            const password = '123456';
+            const hashedPassword = await bcrypt.hash(password, 10);
             const defaultUser = new User({
                 email: "admin@gmail.com",
                 username: "admin",
                 companyUrl: "https://example.com",
                 subscriptionStatus: "active",
                 validity: new Date(new Date().setFullYear(new Date().getFullYear() + 1)), // 1 year validity
-                password: "admin123",
+                password: hashedPassword,
                 token: null,
                 apiKey: "default-api-key",
                 apiKey: "admin",
