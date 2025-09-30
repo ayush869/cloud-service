@@ -2,11 +2,14 @@
   "name": "cloud-service",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "migrate": "node src/database/databaseHandler.js migrate",
+    "seed": "node src/database/databaseHandler.js seed",
+    "dbwipe": "node src/database/databaseHandler.js dbwipe"
   },
   "keywords": [],
   "author": "",
