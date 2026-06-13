@@ -1,27 +1,64 @@
-require('dotenv').config();
-const express = require('express');
-const helmet = require('helmet');
-const cors = require('cors');
-const rateLimit = require('express-rate-limit');
-const authRoutes = require('./routes/auth');
-const storageRoutes = require('./routes/storage');
+import cors from 'cors';
+import dotenv from 'dotenv';
+import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import authApi from './api/authApi.js';
+
+dotenv.config();
+
 const app = express();
+const PORT = process.env.PORT || 5000;
+const CLIENT_URL = process.env.CLIENT_URL || 'http://127.0.0.1:5173';
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(helmet());
-app.use(cors());
 
-// Rate Limiter (example: 100 requests per 15 min per IP)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100
+app.use(
+  cors({
+    origin: CLIENT_URL,
+    credentials: true,
+  }),
+);
+
+app.use(express.json());
+app.use(express.urlencoded({extended: true}));
+
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }),
+);
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Recruiter AI backend is running',
+  });
 });
 
-app.use(limiter);
-app.use('/api/auth', authRoutes);
-app.use('/api/storage', storageRoutes);
-app.get('/', (req, res) => res.send('Cloud Storage API is running!'));
+app.use('/api/auth', authApi);
 
-module.exports = app;
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.url}`,
+  });
+});
+
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error',
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server started on http://localhost:${PORT}`);
+});
+
+export default app;
