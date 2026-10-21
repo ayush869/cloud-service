@@ -5,7 +5,7 @@ export const MAX_NAME_LENGTH = 255;
 export const MAX_PATH_LENGTH = 1024;
 
 // Control characters and characters that break URLs/filesystems for clients.
-const FORBIDDEN = /[\u0000-\u001f\u007f\]/;
+const FORBIDDEN = /[\u0000-\u001f\u007f\\]/;
 
 /** Validates one file/folder name and returns it NFC-normalized. */
 export function normalizeName(raw: string, what = 'name'): string {
@@ -25,7 +25,7 @@ export function normalizeName(raw: string, what = 'name'): string {
  */
 export function normalizePath(raw: string): string {
   const segments = (raw ?? '')
-    .replace(/\/g, '/')
+    .replace(/\\/g, '/')
     .split('/')
     .filter((s) => s !== '');
   if (segments.length === 0) throw Errors.validation('The path must not be empty');

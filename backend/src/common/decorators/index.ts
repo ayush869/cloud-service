@@ -31,6 +31,23 @@ export const Idempotent = () => SetMetadata(IDEMPOTENT_KEY, true);
 /** Human readable message placed in the success envelope. */
 export const ResponseMessage = (message: string) => SetMetadata(RESPONSE_MESSAGE_KEY, message);
 
+export interface ClientMeta {
+  ipAddress: string;
+  userAgent?: string;
+  requestId: string;
+}
+
+/** Client IP / user agent / request id, for audit rows written before a user is authenticated. */
+export const Client = createParamDecorator((_: unknown, ctx: ExecutionContext): ClientMeta => {
+  const request = ctx.switchToHttp().getRequest<FastifyRequest>();
+  return clientMetaOf(request);
+});
+
+export function clientMetaOf(request: FastifyRequest): ClientMeta {
+  const ua = request.headers['user-agent'];
+  return { ipAddress: request.ip, userAgent: typeof ua === 'string' ? ua : undefined, requestId: String(request.id) };
+}
+
 /** Injects the AuthContext produced by AuthGuard. */
 export const CurrentContext = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthContext => {
   const request = ctx.switchToHttp().getRequest<FastifyRequest>();

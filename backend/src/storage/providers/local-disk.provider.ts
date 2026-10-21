@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { constants, createReadStream, createWriteStream, promises as fs } from 'node:fs';
+import { constants, createWriteStream, promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -45,8 +45,10 @@ export class LocalDiskStorageProvider extends StorageProvider {
   async get(key: string, range?: ByteRange): Promise<Readable> {
     const file = this.localPath(key);
     // Open first so a missing file rejects here instead of erroring mid-response.
+    // The stream owns the FileHandle and closes it (never hand out handle.fd: the
+    // handle would be closed a second time on garbage collection and crash the process).
     const handle = await fs.open(file, 'r');
-    return createReadStream('', { fd: handle.fd, autoClose: true, start: range?.start, end: range?.end });
+    return handle.createReadStream({ autoClose: true, start: range?.start, end: range?.end });
   }
 
   async stat(key: string): Promise<StoredObjectInfo | null> {

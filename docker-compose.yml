@@ -1,0 +1,112 @@
+# Single-server deployment (e.g. one EC2 instance): MySQL, Redis, API, worker, nginx.
+# 1. cp .env.example .env  and fill it in
+# 2. sudo mkdir -p $STORAGE_HOST_PATH && sudo chown -R 1000:1000 $STORAGE_HOST_PATH
+# 3. docker compose up -d --build
+# See docs/deployment.md.
+
+name: cloud-storage
+
+x-backend-env: &backend-env
+  NODE_ENV: production
+  PORT: 3000
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+  TRUST_PROXY: "true"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+  REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
+  DASHBOARD_ORIGINS: ${DASHBOARD_ORIGINS:-}
+  DATABASE_URL: mysql://cloud:${MYSQL_PASSWORD}@mysql:3306/cloud_storage
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+  URL_SIGNING_SECRET: ${URL_SIGNING_SECRET:?set URL_SIGNING_SECRET}
+  API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER}
+  STORAGE_ROOT: /var/lib/cloud-storage/data
+  SERVE_MODE: ${SERVE_MODE:-x-accel}
+  MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-1073741824}
+  DEFAULT_TENANT_STORAGE_LIMIT_BYTES: ${DEFAULT_TENANT_STORAGE_LIMIT_BYTES:-53687091200}
+  TRASH_RETENTION_DAYS: ${TRASH_RETENTION_DAYS:-30}
+  PUBLIC_CACHE_MAX_AGE: ${PUBLIC_CACHE_MAX_AGE:-86400}
+
+services:
+  mysql:
+    image: mysql:8.4
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_DATABASE: cloud_storage
+      MYSQL_USER: cloud
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    # noeviction is required by BullMQ; AOF keeps queued jobs across restarts.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build: ./backend
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment: *backend-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: ./backend
+    environment: *backend-env
+    volumes:
+      - ${STORAGE_HOST_PATH:-./data/storage}:/var/lib/cloud-storage/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: ["node", "dist/worker.js"]
+    environment: *backend-env
+    volumes:
+      - ${STORAGE_HOST_PATH:-./data/storage}:/var/lib/cloud-storage/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      # Read-only: nginx only serves bytes the API has authorized (X-Accel-Redirect).
+      - ${STORAGE_HOST_PATH:-./data/storage}:/var/lib/cloud-storage/data:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:

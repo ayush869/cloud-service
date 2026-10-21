@@ -51,7 +51,8 @@ export class CacheService {
   async setIfAbsent(key: string, value: unknown, ttlSeconds: number): Promise<boolean> {
     const raw = JSON.stringify(value);
     if (this.redis.client) {
-      return (await this.redis.client.set(key, raw, 'EX', ttlSeconds, 'NX')) === 'OK';
+      const result = await this.redis.client.set(key, raw, 'EX', ttlSeconds, 'NX').catch(() => null);
+      return result === 'OK';
     }
     const existing = this.local.get(key);
     if (existing && existing.expiresAt > Date.now()) return false;

@@ -1,4 +1,5 @@
 export * from './permissions';
+export * from './cache-keys';
 
 /** All JSON APIs live under this prefix (file-serving routes /p and /d do not). */
 export const API_PREFIX = 'api/v1';
