@@ -1,0 +1,335 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ProjectStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum FileStatus {
+  PENDING
+  PROCESSING
+  AVAILABLE
+  FAILED
+  QUARANTINED
+  DELETED
+  PERMANENTLY_DELETED
+}
+
+enum Visibility {
+  PRIVATE
+  PUBLIC
+}
+
+enum UploadStatus {
+  CREATED
+  UPLOADED
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model Tenant {
+  id                String       @id @default(uuid(7)) @db.Char(36)
+  name              String       @db.VarChar(150)
+  slug              String       @unique @db.VarChar(64)
+  status            TenantStatus @default(ACTIVE)
+  storageLimitBytes BigInt       @map("storage_limit_bytes")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.DateTime(3)
+
+  users        User[]
+  projects     Project[]
+  apiKeys      ApiKey[]
+  folders      Folder[]
+  files        File[]
+  usage        StorageUsage?
+  auditLogs    AuditLog[]
+  uploads      UploadSession[]
+  refreshToken RefreshToken[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String     @id @default(uuid(7)) @db.Char(36)
+  tenantId     String     @map("tenant_id") @db.Char(36)
+  name         String     @db.VarChar(150)
+  email        String     @unique @db.VarChar(191)
+  passwordHash String     @map("password_hash") @db.VarChar(255)
+  role         UserRole   @default(MEMBER)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?  @map("last_login_at") @db.DateTime(3)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  refreshTokens  RefreshToken[]
+  passwordResets PasswordResetToken[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid(7)) @db.Char(36)
+  tenantId   String    @map("tenant_id") @db.Char(36)
+  userId     String    @map("user_id") @db.Char(36)
+  familyId   String    @map("family_id") @db.Char(36)
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at") @db.DateTime(3)
+  revokedAt  DateTime? @map("revoked_at") @db.DateTime(3)
+  ipAddress  String?   @map("ip_address") @db.VarChar(64)
+  userAgent  String?   @map("user_agent") @db.VarChar(255)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.DateTime(3)
+  usedAt    DateTime? @map("used_at") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Project {
+  id          String        @id @default(uuid(7)) @db.Char(36)
+  tenantId    String        @map("tenant_id") @db.Char(36)
+  name        String        @db.VarChar(150)
+  slug        String        @db.VarChar(64)
+  description String?       @db.VarChar(500)
+  status      ProjectStatus @default(ACTIVE)
+  /// Browser origins allowed to call the API with this project's keys, e.g. ["https://abc.com"].
+  allowedOrigins Json       @map("allowed_origins")
+  /// { defaultVisibility, maxUploadBytes, allowedExtensions } - see ProjectSettings.
+  settings    Json
+  createdAt   DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.DateTime(3)
+  deletedAt   DateTime?     @map("deleted_at") @db.DateTime(3)
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKeys ApiKey[]
+  folders Folder[]
+  files   File[]
+  uploads UploadSession[]
+
+  @@unique([tenantId, slug])
+  @@map("projects")
+}
+
+model ApiKey {
+  id          String       @id @default(uuid(7)) @db.Char(36)
+  tenantId    String       @map("tenant_id") @db.Char(36)
+  projectId   String       @map("project_id") @db.Char(36)
+  name        String       @db.VarChar(150)
+  /// Public lookup id embedded in the key (cs_live_{keyPrefix}_{secret}).
+  keyPrefix   String       @unique @map("key_prefix") @db.VarChar(32)
+  keyHash     String       @map("key_hash") @db.Char(64)
+  permissions Json
+  status      ApiKeyStatus @default(ACTIVE)
+  expiresAt   DateTime?    @map("expires_at") @db.DateTime(3)
+  lastUsedAt  DateTime?    @map("last_used_at") @db.DateTime(3)
+  createdBy   String?      @map("created_by") @db.Char(36)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  revokedAt   DateTime?    @map("revoked_at") @db.DateTime(3)
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, projectId])
+  @@map("api_keys")
+}
+
+model Folder {
+  id            String    @id @default(uuid(7)) @db.Char(36)
+  tenantId      String    @map("tenant_id") @db.Char(36)
+  projectId     String    @map("project_id") @db.Char(36)
+  parentId      String?   @map("parent_id") @db.Char(36)
+  name          String    @db.VarChar(255)
+  /// Full logical path, e.g. "images/products". Kept in sync on rename/move.
+  path          String    @db.VarChar(1024)
+  /// sha256(projectId:path) while active, NULL once trashed - enforces unique active paths.
+  pathHash      String?   @map("path_hash") @db.Char(64)
+  createdBy     String?   @map("created_by") @db.Char(36)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  deletedAt     DateTime? @map("deleted_at") @db.DateTime(3)
+  deleteBatchId String?   @map("delete_batch_id") @db.Char(36)
+  isTrashRoot   Boolean   @default(false) @map("is_trash_root")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   Folder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Folder[] @relation("FolderTree")
+  files    File[]
+
+  @@unique([projectId, pathHash])
+  @@index([tenantId, projectId, parentId, deletedAt])
+  @@index([tenantId, deleteBatchId])
+  @@map("folders")
+}
+
+model File {
+  id              String     @id @default(uuid(7)) @db.Char(36)
+  tenantId        String     @map("tenant_id") @db.Char(36)
+  projectId       String     @map("project_id") @db.Char(36)
+  folderId        String?    @map("folder_id") @db.Char(36)
+  /// Current logical name (changes on rename).
+  name            String     @db.VarChar(255)
+  /// Name as uploaded.
+  originalName    String     @map("original_name") @db.VarChar(255)
+  /// Opaque object name (uuid) - never derived from user input.
+  storedName      String     @map("stored_name") @db.Char(36)
+  path            String     @db.VarChar(1024)
+  pathHash        String?    @map("path_hash") @db.Char(64)
+  storageProvider String     @map("storage_provider") @db.VarChar(32)
+  storageBucket   String     @map("storage_bucket") @db.VarChar(64)
+  storageKey      String     @map("storage_key") @db.VarChar(255)
+  mimeType        String     @map("mime_type") @db.VarChar(127)
+  extension       String     @db.VarChar(32)
+  sizeBytes       BigInt     @default(0) @map("size_bytes")
+  checksum        String?    @db.Char(64)
+  status          FileStatus @default(PENDING)
+  visibility      Visibility @default(PRIVATE)
+  version         Int        @default(1)
+  createdBy       String?    @map("created_by") @db.Char(36)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
+  deletedAt       DateTime?  @map("deleted_at") @db.DateTime(3)
+  deleteBatchId   String?    @map("delete_batch_id") @db.Char(36)
+  isTrashRoot     Boolean    @default(false) @map("is_trash_root")
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder   Folder?         @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  versions FileVersion[]
+  uploads  UploadSession[]
+
+  @@unique([projectId, pathHash])
+  @@index([tenantId, projectId, folderId, deletedAt])
+  @@index([tenantId, projectId, status, createdAt])
+  @@index([tenantId, deletedAt, isTrashRoot])
+  @@index([tenantId, deleteBatchId])
+  @@map("files")
+}
+
+model FileVersion {
+  id            String    @id @default(uuid(7)) @db.Char(36)
+  tenantId      String    @map("tenant_id") @db.Char(36)
+  fileId        String    @map("file_id") @db.Char(36)
+  versionNumber Int       @map("version_number")
+  storageKey    String    @map("storage_key") @db.VarChar(255)
+  sizeBytes     BigInt    @map("size_bytes")
+  checksum      String?   @db.Char(64)
+  mimeType      String    @map("mime_type") @db.VarChar(127)
+  createdBy     String?   @map("created_by") @db.Char(36)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  /// Set when the bytes of a superseded version were removed from storage.
+  purgedAt      DateTime? @map("purged_at") @db.DateTime(3)
+
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, versionNumber])
+  @@index([tenantId])
+  @@map("file_versions")
+}
+
+model UploadSession {
+  id             String       @id @default(uuid(7)) @db.Char(36)
+  tenantId       String       @map("tenant_id") @db.Char(36)
+  projectId      String       @map("project_id") @db.Char(36)
+  fileId         String       @map("file_id") @db.Char(36)
+  storageKey     String       @map("storage_key") @db.VarChar(255)
+  expectedSize   BigInt       @map("expected_size")
+  receivedSize   BigInt?      @map("received_size")
+  checksum       String?      @db.Char(64)
+  mimeType       String       @map("mime_type") @db.VarChar(127)
+  detectedMime   String?      @map("detected_mime") @db.VarChar(127)
+  status         UploadStatus @default(CREATED)
+  createdBy      String?      @map("created_by") @db.Char(36)
+  expiresAt      DateTime     @map("expires_at") @db.DateTime(3)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  completedAt    DateTime?    @map("completed_at") @db.DateTime(3)
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  file    File    @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, projectId])
+  @@index([status, expiresAt])
+  @@map("upload_sessions")
+}
+
+model StorageUsage {
+  tenantId  String   @id @map("tenant_id") @db.Char(36)
+  usedBytes BigInt   @default(0) @map("used_bytes")
+  fileCount Int      @default(0) @map("file_count")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("storage_usage")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid(7)) @db.Char(36)
+  tenantId     String   @map("tenant_id") @db.Char(36)
+  userId       String?  @map("user_id") @db.Char(36)
+  apiKeyId     String?  @map("api_key_id") @db.Char(36)
+  projectId    String?  @map("project_id") @db.Char(36)
+  action       String   @db.VarChar(64)
+  resourceType String   @map("resource_type") @db.VarChar(32)
+  resourceId   String?  @map("resource_id") @db.Char(36)
+  ipAddress    String?  @map("ip_address") @db.VarChar(64)
+  userAgent    String?  @map("user_agent") @db.VarChar(255)
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, action, createdAt])
+  @@map("audit_logs")
+}
